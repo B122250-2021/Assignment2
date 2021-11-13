@@ -1,4 +1,4 @@
-import os,subprocess,shutil,sys
+import os,subprocess,shutil,sys,re,glob
 import numpy as np
 import pandas as pd
 
@@ -25,7 +25,7 @@ if len(acc_list) > 1000:
 		sys.exit()
 print('Fetching Protein Sequences...')
 os.system('esearch -db protein -query "' + tax_grp + '[Organism] AND ' + prot_fam + '[Protein] NOT PARTIAL" | efetch -format fasta > protein_sequences/input.fa')
-print('Done')
+print('Done, Counting Species...')
 #Need to figure out how many species I have
 os.system('esearch -db protein -query "' + tax_grp + '[Organism] AND ' + prot_fam + '[Protein] NOT PARTIAL" | efetch -format gbc | xtract -pattern INSDSeq -group INSDFeature -block INSDQualifier -element INSDQualifier_name INSDQualifier_value | grep {} | cut -f2 >  all_species.txt'.format('organism')) #used the .format to avoid sysntax errors with apostrophes
 species=[]
@@ -50,6 +50,8 @@ allsequences = content.split('>')
 foo.close()
 for sequence in allsequences[1:]:
 	acc = sequence.split()[0] #retrieve the accession value
+	if acc.startswith('sp'):
+		acc = acc.split('|')[2]
 	current_file = open('protein_sequences/individual_sequences/' + acc + '.fa','w')
 	current_file.write('>' + sequence)
 #Scan prosite
@@ -57,4 +59,22 @@ for sequence in allsequences[1:]:
 directory = 'protein_sequences/individual_sequences/'
 for filename in os.listdir(directory):
 	file = os.path.join(directory, filename)
-	os.system('patmatmotifs -sequence {} -outfile prosite_motifs/{}.patmatmotifs'.format(file,file[39:])) #file[39:] is the accession number
+	os.system('patmatmotifs -sequence {} -outfile prosite_motifs/{}.patmatmotifs'.format(file,file[39:])) #file[39:] is the accessioan number
+
+#Extract motifs, and write them down to a file
+files = glob.glob('prosite_motifs/*')
+for file in files:
+	motifs = open("motifs.txt", "a")
+	elements = []
+	with open(file,'r') as f:
+		for line in f:
+			pattern1 = 'Sequence'
+			if re.search( pattern1, line):
+				elements.append(line.split()[2]) #the accession value
+			pattern2 = 'Motif'
+			if re.search(pattern2,line):
+				elements.append(line.split()[2]) # the motif
+	for element in elements:
+		motifs.write(element + '\t')
+	motifs.write('\n')
+
