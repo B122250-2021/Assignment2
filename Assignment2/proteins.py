@@ -1,6 +1,8 @@
-import os,subprocess,shutil,sys,re,glob
+#!/usr/bin/env python3
+import os,subprocess,shutil,sys,re,glob,ete3
 import numpy as np
 import pandas as pd
+from ete3 import Tree
 
 #input test
 os.system("mkdir protein_sequences && mkdir protein_sequences/individual_sequences && mkdir prosite_motifs")
@@ -37,9 +39,35 @@ if input('There are {} species in your analysis, you can see them in all_species
 	sys.exit()
 #I think I need to use BLAST and Clustalo as te tests before continuing to the next section
 #use clustalo to align
-print('Aligning sequences...')
-os.system('clustalo -i protein_sequences/input.fa -o protein_sequences/aligned_sequences.fa')
-print('Done. Producing conservation plot. Graph will appear on screen, but will also be saved as plotcon.svg')
+print('Aligning sequences + building phylogenetic tree...')
+os.system('clustalo --threads=64 -i protein_sequences/input.fa -o protein_sequences/aligned_sequences.fa --guidetree-out=clustalo_tree')
+#Making tree file
+#create a dict with acc vs species, to make more usefull tree
+#since the values are written to the file in the order that they are retrieved, acc and species name will be in order in their respective files
+spp_list=[]
+acc_spp = {}
+for line in open("all_species.txt", "r"):
+	spp_list.append(line.strip())
+for a,s in zip(acc_list,spp_list):
+	acc_spp[a] = s
+#Now I need to change all acc values in the tree file for the format acc_spp, as a tree that only has the accession value is not very informative
+newtree = open("newick_tree.txt", "a")
+for line in open("clustalo_tree", "r"):
+	if line.startswith('(') or line.startswith(')') or line.startswith(',') or line.startswith(';'):
+		newtree.write(line)
+	else:
+		acc = line.split(':')[0]
+		spp = acc_spp.get(acc)
+		spp = spp.replace(' ','_')
+		newtree.write(acc + '_' + spp +':' + line.split(':')[1]) 
+newtree.close()
+sys.stdout = open("tree.txt", "w")
+t = Tree("newick_tree.txt", format=1)
+print(t)
+sys.stdout.close()
+#reopening stdout
+sys.stdout = open("/dev/stdout", "w")
+print('Done. File tree.nw contains Guide tree written in Newick format, tree.txt contains a visual representation of the infered tree.\n Producing conservation plot. Graph will appear on screen, but will also be saved as plotcon.svg')
 os.system('plotcon -sequences protein_sequences/aligned_sequences.fa -winsize 4 -graph x11 -graph svg && plotcon -sequences protein_sequences/aligned_sequences.fa -winsize 4 -graph x11')
 print('Done')
 print('Searching for known protein motifs in our query sequences...')
@@ -54,12 +82,13 @@ for sequence in allsequences[1:]:
 		acc = acc.split('|')[2]
 	current_file = open('protein_sequences/individual_sequences/' + acc + '.fa','w')
 	current_file.write('>' + sequence)
+	current_file.close()
 #Scan prosite
 #loop through files
 directory = 'protein_sequences/individual_sequences/'
 for filename in os.listdir(directory):
 	file = os.path.join(directory, filename)
-	os.system('patmatmotifs -sequence {} -outfile prosite_motifs/{}.patmatmotifs'.format(file,file[39:])) #file[39:] is the accessioan number
+	os.system('patmatmotifs -sequence {} -outfile prosite_motifs/{}.patmatmotifs -auto'.format(file,file[39:])) #file[39:] is the accessioan number
 
 #Extract motifs, and write them down to a file
 files = glob.glob('prosite_motifs/*')
@@ -77,4 +106,5 @@ for file in files:
 	for element in elements:
 		motifs.write(element + '\t')
 	motifs.write('\n')
+print('Done. The motifs for each sequence can be found in motifs.txt')
 
