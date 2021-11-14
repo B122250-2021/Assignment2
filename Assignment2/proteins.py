@@ -77,6 +77,11 @@ newtree = open("newick_tree.txt", "a")
 for line in open("clustalo_tree", "r"):
 	if line.startswith('(') or line.startswith(')') or line.startswith(',') or line.startswith(';'):
 		newtree.write(line)
+	elif line.startswith('sp|'):
+		acc = line.split('|')[1] #some sequences are found in this format
+		spp = acc_spp.get(acc)
+		spp = spp.replace(' ','_')
+		newtree.write(acc + '_' + spp +':' + line.split(':')[1])
 	else:
 		acc = line.split(':')[0]
 		spp = acc_spp.get(acc)
@@ -131,3 +136,6 @@ for file in files:
 	motifs.write('\n')
 print('Done. The motifs for each sequence can be found in motifs.txt')
 
+#Option to perform tmap analysis
+if input("Do you want to predict and plot possible transmembrane segments in the sequences (tmap)? If yes, press y:\n\t") =='y':
+	os.system('tmap -sequences protein_sequences/aligned_sequences.fa -graph svg -outfile report.tmap && tmap -sequences protein_sequences/aligned_sequences.fa -graph x11 -outfile report.tmap')
