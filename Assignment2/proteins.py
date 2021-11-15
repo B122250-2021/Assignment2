@@ -1,8 +1,15 @@
-import os,subprocess,shutil,sys,re,glob,ete3
+
+#Using pullseq
+#Ask the user to select from the options:
+#-use all species -use sequences most common species(if so, how many) - use sequences from least common -cycle one by one and decide if you use them
+import os,subprocess,shutil,sys,re,glob,ete3,collections,argparse
 import numpy as np
 import pandas as pd
 from ete3 import Tree
-import argparse
+from collections import Counter
+
+
+os.system("mkdir protein_sequences && mkdir protein_sequences/individual_sequences && mkdir prosite_motifs")
 
 #input test
 os.system("mkdir protein_sequences && mkdir protein_sequences/individual_sequences && mkdir prosite_motifs")
@@ -22,9 +29,6 @@ if tax_grp is None:
 	tax_grp = input("No taxonomic group was selected. Please enter the taxonomic group you want to investigate:\n\t")
 if prot_fam is None:
 	prot_fam = input("No protein family was selected. Please enter the desired protein family:\n\t")
-
-#Doing an esearch, and piping it to efetch
-
 #need a prompt asking if you want partial or not
 print('Fetching Accession values for {} proteins in {}...'.format(prot_fam,tax_grp))
 print('Please quit now if these is not the desired query')
@@ -48,10 +52,6 @@ species=[]
 for line in open("all_species.txt", "r"):
 	species.append(line.strip())
 non_redundant_species=set(species)
-if input('There are {} species in your analysis, you can see them in all_species.txt. Press y if you wish to continue.\n\t'.format(len(non_redundant_species))) != 'y':
-	print('Exiting analysis')
-	sys.exit()
-
 #create a dict with acc vs species, useful later on when building tree
 #since the values are written to the file in the order that they are retrieved, acc and species name will be in order in their respective files
 spp_list=[]
@@ -60,12 +60,73 @@ for line in open("all_species.txt", "r"):
 	spp_list.append(line.strip())
 for a,s in zip(acc_list,spp_list):
 	acc_spp[a] = s
-
-
+#Maybe add option for partial, and argument
 print('Fetching Protein Sequences...')
-os.system('esearch -db protein -query "' + tax_grp + '[Organism] AND ' + prot_fam + '[Protein] NOT PARTIAL" | efetch -format fasta > protein_sequences/input.fa')
+os.system('esearch -db protein -query "' + tax_grp + '[Organism] AND ' + prot_fam + '[Protein] NOT PARTIAL" | efetch -format fasta > protein_sequences/all_sequences.fa')
 
-#I think I need to use BLAST and Clustalo as te tests before continuing to the next section
+choice = input('\nThere are {} species in your analysis, you can see them in all_species.txt at the end of the analysis.\nFor now, please chose one of the following options, or press any other key to exit:\n\n\t-Use all sequences for the analysis (Will take a long time for large datasets) (Press 1)\n\n\t-Use sequences from the most common species (Press 2)\n\n\t-Use sequences from the least common species (Press 3)\n\n\t-Cycle one by one and chose which species you want (Not recomended for large datasets) (Press 4)\n\n\t'.format(len(non_redundant_species)))
+if int(choice) == 1 :
+	print('All sequences will be used for the analysis. \nTe alignment may take a while, depending on the ammount of sequences')
+	os.system('cp protein_sequences/all_sequences.fa protein_sequences/input.fa')
+
+elif int(choice) == 2 :
+	spp_no = int(input('These are the 10 most common species, please select how many you want to use:\n\t{}\n'.format(Counter(species).most_common(10))))
+	if spp_no > 10:
+		print('The number you selected is greater than the displayed number, Exiting...')
+		sys.exit()
+	
+	selected_species = []
+	numbers = np.linspace(1,spp_no,spp_no)
+	for x in numbers:
+		selected_species.append(Counter(species).most_common(10)[int(x)-1][0])
+	
+	filtered_acc = []
+	for species in selected_species:
+		keys = [key for key,value in acc_spp.items() if value == species]
+		for key in keys:
+			filtered_acc.append(key)
+	
+	with open("protein_sequences/filtered_acc_numbers.txt", "w") as new_acc_values:
+		for acc in filtered_acc:
+			new_acc_values.write('{}\n'.format(acc))
+	new_acc_values.close()
+	os.system('/localdisk/data/BPSM/Assignment2/pullseq -i protein_sequences/all_sequences.fa -n protein_sequences/filtered_acc_numbers.txt > protein_sequences/input.fa')
+
+elif int(choice) == 3:
+	spp_no = int(input('These are the 10 least common species, please select how many you want to use:\n\t{}\n'.format(Counter(species).most_common()[-11:-1])))
+	if spp_no > 10:
+		print('The number you selected is greater than the displayed number, Exiting...')
+	
+	selected_species = []
+	numbers = np.linspace(1,spp_no,spp_no)
+	for x in numbers:
+		selected_species.append(Counter(species).most_common()[-int(x)][0])
+	filtered_acc = []
+	for species in selected_species:
+		keys = [key for key,value in acc_spp.items() if value == species]
+		for key in keys:
+			filtered_acc.append(key)
+	
+	with open("protein_sequences/filtered_acc_numbers.txt", "a") as new_acc_values:
+		for acc in filtered_acc:
+			new_acc_values.write('{}\n'.format(acc))
+	new_acc_values.close()
+	os.system('/localdisk/data/BPSM/Assignment2/pullseq -i protein_sequences/all_sequences.fa -n protein_sequences/filtered_acc_numbers.txt > protein_sequences/input.fa')
+
+elif int(choice) == 4:
+	for current_species in non_redundant_species:
+		if input('There are {} occurrances of {} in this dataset. Do you want to include the sequences in the analysis?\n Press y if yes, any other key will discard the sequence(s)'.format(species.count(current_species),current_species)) =='y':
+			new_acc_values = open("protein_sequences/filtered_acc_numbers.txt", "a")
+			keys = [key for key,value in acc_spp.items() if value == current_species]
+			for key in keys:
+				new_acc_values.write('{}\n'.format(key))
+			new_acc_values.close()
+	os.system('/localdisk/data/BPSM/Assignment2/pullseq -i protein_sequences/all_sequences.fa -n protein_sequences/filtered_acc_numbers.txt > protein_sequences/input.fa')
+
+else:
+	print('Exiting analysis')
+	sys.exit()
+
 #use clustalo to align
 print('Aligning sequences + building phylogenetic tree...')
 os.system('clustalo --threads=64 -i protein_sequences/input.fa -o protein_sequences/aligned_sequences.fa --guidetree-out=clustalo_tree')
@@ -98,7 +159,7 @@ print('Done. File tree.nw contains Guide tree written in Newick format, tree.txt
 
 os.system('plotcon -sequences protein_sequences/aligned_sequences.fa -winsize 4 -graph x11 -graph svg && plotcon -sequences protein_sequences/aligned_sequences.fa -winsize 4 -graph x11')
 print('Done')
-print('Searching for known protein motifs in our query sequences...')
+print('Searching for known protein motifs in the query sequences...')
 #to scan for motifs, file needs to be split
 foo = open("protein_sequences/input.fa", "r")
 content = foo.read()
@@ -139,3 +200,4 @@ print('Done. The motifs for each sequence can be found in motifs.txt')
 #Option to perform tmap analysis
 if input("Do you want to predict and plot possible transmembrane segments in the sequences (tmap)? If yes, press y:\n\t") =='y':
 	os.system('tmap -sequences protein_sequences/aligned_sequences.fa -graph svg -outfile report.tmap && tmap -sequences protein_sequences/aligned_sequences.fa -graph x11 -outfile report.tmap')
+
