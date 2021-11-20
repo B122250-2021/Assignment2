@@ -1,12 +1,24 @@
 #!/usr/bin/python3
 
+#Using pullseq
 #Ask the user to select from the options:
 #-use all species -use sequences most common species(if so, how many) - use sequences from least common -cycle one by one and decide if you use them
+
 import os,subprocess,shutil,sys,re,glob,ete3,collections,argparse,fileinput
 import numpy as np
 import pandas as pd
 from ete3 import Tree
 from collections import Counter
+
+
+print('Your current working directory is {}, please type the path where you want this analysis made:\n(the default is the current working directory, you can just press enter to stay in the current directory):\n\t'.format(os.getcwd()))
+wd = input()
+try:
+	os.chdir(wd)
+except FileNotFoundError:
+	print("Directory: {} does not exist, defaulting to current directory".format(wd))
+except NotADirectoryError:
+	print("{} is not a directory, defaulting to current directory".format(wd))
 
 #input test
 os.system("mkdir protein_sequences && mkdir protein_sequences/individual_sequences && mkdir prosite_motifs")
@@ -33,15 +45,22 @@ else:
 	partial = ' NOT PARTIAL'
 #need a prompt asking if you want partial or not
 print('Fetching Accession values for {} proteins in {}...'.format(prot_fam,tax_grp))
-print('Please quit now if these is not the desired query')
-os.system('esearch -db protein -query "' + tax_grp + '[Organism] AND ' + prot_fam + '[Protein]' + partial +'"| efetch -format acc > protein_sequences/acc_numbers.txt')
+print('Please quit now if this is not the desired query')
 #read the accession numbers to get the sequences, and print a warning if longer than 1000
 #Ask the user if they want to set a limit
 #efetch limit
+os.system('esearch -db protein -query "' + tax_grp + '[Organism] AND ' + prot_fam + '[Protein]' + partial + '" | efetch -format gbc | xtract -pattern INSDSeq -element INSDSeq_accession-version -element INSDSeq_organism | cut -f1,2 >  acc_spp.txt')
 acc_list=[]
-for line in open("protein_sequences/acc_numbers.txt", "r"):
-	acc_list.append(line.strip())
-print('There are {} protein sequences that match this query.'.format(len(acc_list)))
+species=[]
+acc_spp = {}
+for line in open("acc_spp.txt", "r"):
+	acc_list.append(line.split('\t')[0])
+	species.append(line.split('\t')[1].strip('\n'))
+	acc_spp[line.split('\t')[0]] = line.split('\t')[1].strip('\n')
+non_redundant_species = set(species)
+print('There are {} protein sequences, and {} species that match this query.'.format(len(acc_list),len(non_redundant_species)))
+
+
 if len(acc_list) == 0:
 	print('There are no protein sequences that match your query. Please restart with different input arguments.')
 	print('Exiting analysis')
@@ -55,27 +74,11 @@ if len(acc_list) > 1000:
 		print('Exiting analysis')
 		sys.exit()
 
-print('Done, Counting Species...')
-#Need to figure out how many species I have
-os.system('esearch -db protein -query "' + tax_grp + '[Organism] AND ' + prot_fam + '[Protein]' + partial + '" | efetch -format gbc | xtract -pattern INSDSeq -group INSDFeature -block INSDQualifier -element INSDQualifier_name INSDQualifier_value | grep {} | cut -f2 >  all_species.txt'.format('organism')) #used the .format to avoid sysntax errors with apostrophes
-
-species=[]
-for line in open("all_species.txt", "r"):
-	species.append(line.strip())
-non_redundant_species=set(species)
-#create a dict with acc vs species, useful later on when building tree
-#since the values are written to the file in the order that they are retrieved, acc and species name will be in order in their respective files
-spp_list=[]
-acc_spp = {}
-for line in open("all_species.txt", "r"):
-	spp_list.append(line.strip())
-for a,s in zip(acc_list,spp_list):
-	acc_spp[a] = s
-#Maybe add option for partial, and argument
 print('Fetching Protein Sequences...')
 os.system('esearch -db protein -query "' + tax_grp + '[Organism] AND ' + prot_fam + '[Protein]' + partial + '" | efetch -format fasta > protein_sequences/all_sequences.fa')
 
-#changing the format of the files that start with sp|, as pullseq will just skip them
+#changing the format of the files that start with sp|, or tr|, as pullseq will just skip them, I encountered these two, but I am aware that there might be more
+#which is why I added the next section which makes sure about the format and prints a warning if unrecognised
 def replaceAll(file,search,replace):
     for line in fileinput.input(file, inplace=1):
         if search in line:
@@ -83,9 +86,15 @@ def replaceAll(file,search,replace):
         sys.stdout.write(line)
 
 replaceAll('protein_sequences/all_sequences.fa','sp|','')
+replaceAll('protein_sequences/all_sequences.fa','tr|','')
 replaceAll('protein_sequences/all_sequences.fa','|',' ')
 
-choice = input('\nThere are {} species in your analysis, you can see them in all_species.txt at the end of the analysis.\nFor now, please choose one of the following options, or press any other key to exit:\n\n\t-Use all sequences for the analysis (Will take a long time for large datasets) (Press 1)\n\n\t-Use sequences from the most common species (Press 2)\n\n\t-Use sequences from the least common species (Press 3)\n\n\t-Cycle one by one and chose which species you want (Not recommended for large datasets) (Press 4)\n\n\t'.format(len(non_redundant_species)))
+#Check the formats of the fasta file, to make sure that they will be analysed by pullseq. At this point, any sequence that doesn't start with the accession value will not be recognised by pullseq
+for line in open("protein_sequences/all_sequences.fa", "r"):
+	if line.startswith('>') and line.split(' ')[0][1:] not in acc_list:
+		print('WARNING! Unrecognised accession value\nThe following sequence:\n{}\nis either not in fasta format, or is in a format that is not supported in this program\n'.format(line))
+
+choice = input('\nDo you want to filter your sequences? Please select one of the following options, or press any other key to exit:\n\n\t-Use all sequences for the analysis (Will take a long time for large datasets) (Press 1)\n\n\t-Use sequences from the most common species (Press 2)\n\n\t-Use sequences from the least common species (Press 3)\n\n\t-Cycle one by one and chose which species you want (Not recommended for large datasets) (Press 4)\n\n\t')
 if choice == '1' :
 	print('All sequences will be used for the analysis. \nThe alignment may take a while, depending on the ammount of sequences')
 	os.system('cp protein_sequences/all_sequences.fa protein_sequences/input.fa ')
@@ -151,7 +160,7 @@ else:
 
 #use clustalo to align
 print('Aligning sequences + building phylogenetic tree...')
-os.system('clustalo --threads=64 -i protein_sequences/input.fa -o protein_sequences/aligned_sequences.fa --guidetree-out=clustalo_tree')
+os.system('clustalo --threads=10 -i protein_sequences/input.fa -o protein_sequences/aligned_sequences.fa --guidetree-out=clustalo_tree')
 
 
 #Making tree file
@@ -239,6 +248,7 @@ if input('Would you like to calculate the isoelectric point of the chosen protei
 #if input('Would you like to calculate and plot the hydrophobic moment for the chosen proteins? If yes, press y\n\t') == 'y':
 #	os.system('hmoment -seqall protein_sequences/aligned_sequences.fa -graph svg -outfile report.hmoment  && hmoment -seqall protein_sequences/aligned_sequences.fa -graph x11 -outfile report.hmoment ')
 #pepwindowall analysis
-if input('Would you like to plot a supeimposed hydropathy plot for the chosen sequences (not recommended for large datasets)? If yes, press y\n\t') == 'y':
+if input('Would you like to plot a superimposed hydropathy plot for the chosen sequences (not recommended for large datasets)? If yes, press y\n\t') == 'y':
 	os.system('pepwindowall -sequences protein_sequences/aligned_sequences.fa -window 4 -gxtitle="Residue Position" -gytitle="Hydropathy" -graph svg && pepwindowall -sequences protein_sequences/aligned_sequences.fa -window 4 -gxtitle="Residue Position" -gytitle="Hydropathy" -graph x11 ')
 #interesting emboss apps: helixturnhelix, charge, pepstats?
+
