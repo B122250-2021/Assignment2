@@ -10,39 +10,44 @@ import pandas as pd
 from ete3 import Tree
 from collections import Counter
 
-
-print('Your current working directory is {}, please type the path where you want this analysis made:\n(the default is the current working directory, you can just press enter to stay in the current directory):\n\t'.format(os.getcwd()))
-wd = input()
-try:
-	os.chdir(wd)
-except FileNotFoundError:
-	print("Directory: {} does not exist, defaulting to current directory".format(wd))
-except NotADirectoryError:
-	print("{} is not a directory, defaulting to current directory".format(wd))
-
-#input test
-os.system("mkdir protein_sequences && mkdir protein_sequences/individual_sequences && mkdir prosite_motifs")
-
 parser=argparse.ArgumentParser(
     description='''proteins.py performs an analysis based on user input.\nThe user can provide a Taxonomic Group and a Protein Family of their choice.''',
     epilog="""Please message <my.email> to report any bugs.""")
 parser.add_argument('--taxonomic_group','-t', type=str, help='Taxonomic group of your choice ')
 parser.add_argument('--protein_family', '-p', type=str, help='Protein family of your choice')
-
+parser.add_argument('--dir', '-d', type=str, help='Directory where program will be executed')
+parser.add_argument('--winsize', '-w', type=str, help='Window size of conservation plot and hydropathy plot')
+parser.add_argument('--partial', type=str, help='Window size of conservation plot and hydropathy plot')
 
 args=parser.parse_args()
 prot_fam = args.protein_family 
 tax_grp = args.taxonomic_group
+wd = args.dir
+winsize = args.winsize
+partial = args.partial
 
 #If no arguments are provided
 if tax_grp is None:
 	tax_grp = input("No taxonomic group was selected. Please enter the taxonomic group you want to investigate:\n\t")
 if prot_fam is None:
 	prot_fam = input("No protein family was selected. Please enter the desired protein family:\n\t")
-if input('Do you want to include partial sequences? Press y if yes, any other key will discard partial sequences:\n\t') == 'y':
+if partial is None:
+	partial = input('Do you want to include partial sequences? Press y if yes, any other key will discard partial sequences:\n\t')
+if partial == 'y':
 	partial = ''
 else:
 	partial = ' NOT PARTIAL'
+if wd is None:
+	wd = input('Your current working directory is {}, please type the path where you want this analysis made:\n(the default is the current working directory, you can just press enter to stay in the current directory):\n\t'.format(os.getcwd()))
+
+try:
+	os.chdir(wd)
+except FileNotFoundError:
+	print("Directory: {} does not exist, defaulting to current directory".format(wd))
+except NotADirectoryError:
+	print("{} is not a directory, defaulting to current directory".format(wd))
+os.system("mkdir protein_sequences && mkdir protein_sequences/individual_sequences && mkdir prosite_motifs")
+
 #need a prompt asking if you want partial or not
 print('Fetching Accession values for {} proteins in {}...'.format(prot_fam,tax_grp))
 print('Please quit now if this is not the desired query')
@@ -66,7 +71,7 @@ if len(acc_list) == 0:
 	print('Exiting analysis')
 	sys.exit()
 elif len(acc_list) ==1:
-	print('There is only one protein that matches your query, this programme can\'t use a single sequence as input. Please restart with different input arguments.')
+	print('There is only one protein that matches your query, this program can\'t use a single sequence as input. Please restart with different input arguments.')
 	print('Exiting analysis')
 	sys.exit()
 if len(acc_list) > 1000:
@@ -79,20 +84,13 @@ os.system('esearch -db protein -query "' + tax_grp + '[Organism] AND ' + prot_fa
 
 #changing the format of the files that start with sp|, or tr|, as pullseq will just skip them, I encountered these two, but I am aware that there might be more
 #which is why I added the next section which makes sure about the format and prints a warning if unrecognised
-def replaceAll(file,search,replace):
-    for line in fileinput.input(file, inplace=1):
-        if search in line:
-            line = line.replace(search,replace)
-        sys.stdout.write(line)
-
-replaceAll('protein_sequences/all_sequences.fa','sp|','')
-replaceAll('protein_sequences/all_sequences.fa','tr|','')
-replaceAll('protein_sequences/all_sequences.fa','|',' ')
 
 #Check the formats of the fasta file, to make sure that they will be analysed by pullseq. At this point, any sequence that doesn't start with the accession value will not be recognised by pullseq
+
 for line in open("protein_sequences/all_sequences.fa", "r"):
-	if line.startswith('>') and line.split(' ')[0][1:] not in acc_list:
-		print('WARNING! Unrecognised accession value\nThe following sequence:\n{}\nis either not in fasta format, or is in a format that is not supported in this program\n'.format(line))
+	if line.startswith('>'):
+		if any(acc in line for acc in acc_list) != True:
+			print('WARNING! Unrecognised accession value\nThe following sequence:\n{}\nis either not in fasta format, or is in a format that is not supported in this program\n'.format(line))
 
 choice = input('\nDo you want to filter your sequences? Please select one of the following options, or press any other key to exit:\n\n\t-Use all sequences for the analysis (Will take a long time for large datasets) (Press 1)\n\n\t-Use sequences from the most common species (Press 2)\n\n\t-Use sequences from the least common species (Press 3)\n\n\t-Cycle one by one and chose which species you want (Not recommended for large datasets) (Press 4)\n\n\t')
 if choice == '1' :
@@ -116,11 +114,9 @@ elif choice == '2' :
 		for key in keys:
 			filtered_acc.append(key)
 	
-	with open("protein_sequences/filtered_acc_numbers.txt", "w") as new_acc_values:
-		for acc in filtered_acc:
-			new_acc_values.write('{}\n'.format(acc))
-	new_acc_values.close()
-	os.system('/localdisk/data/BPSM/Assignment2/pullseq -i protein_sequences/all_sequences.fa -n protein_sequences/filtered_acc_numbers.txt > protein_sequences/input.fa')
+	
+	for acc in filtered_acc:
+		os.system('/localdisk/data/BPSM/Assignment2/pullseq -i protein_sequences/all_sequences.fa -g {} >> protein_sequences/input.fa'.format(acc))
 
 elif choice == '3':
 	spp_no = int(input('These are the 10 least common species, please select how many species you want to use:\n\t{}\n'.format(Counter(species).most_common()[-11:-1])))
@@ -137,21 +133,15 @@ elif choice == '3':
 		for key in keys:
 			filtered_acc.append(key)
 	
-	with open("protein_sequences/filtered_acc_numbers.txt", "a") as new_acc_values:
-		for acc in filtered_acc:
-			new_acc_values.write('{}\n'.format(acc))
-	new_acc_values.close()
-	os.system('/localdisk/data/BPSM/Assignment2/pullseq -i protein_sequences/all_sequences.fa -n protein_sequences/filtered_acc_numbers.txt > protein_sequences/input.fa')
-
+	
+	for acc in filtered_acc:
+		os.system('/localdisk/data/BPSM/Assignment2/pullseq -i protein_sequences/all_sequences.fa -g {} >> protein_sequences/input.fa'.format(acc))
 elif choice == '4':
 	for current_species in non_redundant_species:
 		if input('There are {} occurrances of {} in this dataset. Do you want to include the sequences in the analysis?\n Press y if yes, any other key will discard the sequence(s)'.format(species.count(current_species),current_species)) =='y':
-			new_acc_values = open("protein_sequences/filtered_acc_numbers.txt", "a")
 			keys = [key for key,value in acc_spp.items() if value == current_species]
 			for key in keys:
-				new_acc_values.write('{}\n'.format(key))
-			new_acc_values.close()
-	os.system('/localdisk/data/BPSM/Assignment2/pullseq -i protein_sequences/all_sequences.fa -n protein_sequences/filtered_acc_numbers.txt > protein_sequences/input.fa')
+				os.system('/localdisk/data/BPSM/Assignment2/pullseq -i protein_sequences/all_sequences.fa -g {} >> protein_sequences/input.fa'.format(key))
 
 else:
 	print('That wasn\'t one of the options...')
@@ -187,17 +177,18 @@ sys.stdout.close()
 #reopening stdout
 sys.stdout = open("/dev/stdout", "w")
 print('Done. File tree.nw contains Guide tree written in Newick format, tree.txt contains a visual representation of the infered tree.') 
-winsize = input('Please specify a window size for the conservation plot (4 is recommended):\n\t')
+if winsize is None:
+	winsize = input('Please specify a window size for the conservation plot (4 is recommended). \nThe same window size will be used if you decide to perform more analysis:\n\t')
 if winsize.isnumeric() == False:
 	print('That was not a number...\nExiting analysis')
 	sys.exit()
 if int(winsize) > 30:
-	print('This window size is large, conservation plot might not be accurate')
+	print('WARNING:\nThis window size is large, conservation plot might not be accurate if sequences are short')
 if int(winsize) < 4:
-	print('This window size is low, conservation plot might be noisy')
+	print('WARNING:\nThis window size is low, conservation plot might be noisy')
 
 print('Producing conservation plot. Graph will appear on screen, but will also be saved as plotcon.svg')
-os.system('plotcon -sequences protein_sequences/aligned_sequences.fa -winsize 4 -graph x11 -graph svg && plotcon -sequences protein_sequences/aligned_sequences.fa -winsize 4 -graph x11')
+os.system('plotcon -sequences protein_sequences/aligned_sequences.fa -winsize {} -graph x11 -graph svg && plotcon -sequences protein_sequences/aligned_sequences.fa -winsize {} -graph x11'.format(winsize,winsize))
 print('Done')
 print('Searching for known protein motifs in the query sequences...')
 #to scan for motifs, file needs to be split
@@ -239,16 +230,17 @@ for file in files:
 print('Done. The motifs for each sequence can be found in motifs.txt')
 
 #Option to perform tmap analysis
-if input("Do you want to predict and plot possible transmembrane segments in the sequences (tmap)? If yes, press y:\n\t") =='y':
+if input("Do you want to predict and plot possible transmembrane segments in the sequences (tmap, small datasets might result in no hits)? If yes, press y:\n\t") =='y':
 	os.system('tmap -sequences protein_sequences/aligned_sequences.fa -graph svg -outfile report.tmap -auto && tmap -sequences protein_sequences/aligned_sequences.fa -graph x11 -outfile report.tmap -auto')
 #iep analysis
 if input('Would you like to calculate the isoelectric point of the chosen proteins? If yes, press y:\n\t') == 'y':
 	os.system('iep -sequence protein_sequences/aligned_sequences.fa -outfile report.iep')
 #hmoment analysis
-#if input('Would you like to calculate and plot the hydrophobic moment for the chosen proteins? If yes, press y\n\t') == 'y':
-#	os.system('hmoment -seqall protein_sequences/aligned_sequences.fa -graph svg -outfile report.hmoment  && hmoment -seqall protein_sequences/aligned_sequences.fa -graph x11 -outfile report.hmoment ')
+if input('Would you like to calculate the hydrophobic moment for the chosen proteins? If yes, press y\n\t') == 'y':
+	os.system('hmoment -seqall protein_sequences/aligned_sequences.fa  -outfile report.hmoment ')
 #pepwindowall analysis
 if input('Would you like to plot a superimposed hydropathy plot for the chosen sequences (not recommended for large datasets)? If yes, press y\n\t') == 'y':
-	os.system('pepwindowall -sequences protein_sequences/aligned_sequences.fa -window 4 -gxtitle="Residue Position" -gytitle="Hydropathy" -graph svg && pepwindowall -sequences protein_sequences/aligned_sequences.fa -window 4 -gxtitle="Residue Position" -gytitle="Hydropathy" -graph x11 ')
+	os.system('pepwindowall -sequences protein_sequences/aligned_sequences.fa -window {} -gxtitle="Residue Position" -gytitle="Hydropathy" -graph svg && pepwindowall -sequences protein_sequences/aligned_sequences.fa -window {} -gxtitle="Residue Position" -gytitle="Hydropathy" -graph x11 '.format(winsize,winsize))
 #interesting emboss apps: helixturnhelix, charge, pepstats?
+
 
