@@ -17,7 +17,7 @@ parser.add_argument('--taxonomic_group','-t', type=str, help='Taxonomic group of
 parser.add_argument('--protein_family', '-p', type=str, help='Protein family of your choice')
 parser.add_argument('--dir', '-d', type=str, help='Directory where program will be executed')
 parser.add_argument('--winsize', '-w', type=str, help='Window size of conservation plot and hydropathy plot')
-parser.add_argument('--partial', type=str, help='Window size of conservation plot and hydropathy plot')
+parser.add_argument('--partial', '-partial', type=str, help='y if you want to include partial sequences, anything else will exclude them')
 
 args=parser.parse_args()
 prot_fam = args.protein_family 
@@ -27,6 +27,8 @@ winsize = args.winsize
 partial = args.partial
 
 #If no arguments are provided
+if wd is None:
+	wd = input('Your current working directory is {}, please type the path where you want this analysis made:\n(the default is the current working directory, you can just press enter to stay in the current directory):\n\t'.format(os.getcwd()))
 if tax_grp is None:
 	tax_grp = input("No taxonomic group was selected. Please enter the taxonomic group you want to investigate:\n\t")
 if prot_fam is None:
@@ -37,8 +39,6 @@ if partial == 'y':
 	partial = ''
 else:
 	partial = ' NOT PARTIAL'
-if wd is None:
-	wd = input('Your current working directory is {}, please type the path where you want this analysis made:\n(the default is the current working directory, you can just press enter to stay in the current directory):\n\t'.format(os.getcwd()))
 
 try:
 	os.chdir(wd)
@@ -46,7 +46,7 @@ except FileNotFoundError:
 	print("Directory: {} does not exist, defaulting to current directory".format(wd))
 except NotADirectoryError:
 	print("{} is not a directory, defaulting to current directory".format(wd))
-os.system("mkdir protein_sequences && mkdir protein_sequences/individual_sequences && mkdir prosite_motifs")
+os.system("mkdir protein_sequences && mkdir protein_sequences/individual_sequences && mkdir prosite_motifs reports")
 
 #need a prompt asking if you want partial or not
 print('Fetching Accession values for {} proteins in {}...'.format(prot_fam,tax_grp))
@@ -200,7 +200,7 @@ inputseq.close()
 for sequence in allsequences[1:]:
 	acc = sequence.split()[0] #retrieve the accession value
 	if acc.startswith('sp'):
-		acc = acc.split('|')[2]
+		acc = acc.split('|')[1]
 	current_file = open('protein_sequences/individual_sequences/' + acc + '.fa','w')
 	current_file.write('>' + sequence)
 	current_file.close()
@@ -214,33 +214,78 @@ for filename in os.listdir(directory):
 #Extract motifs, and write them down to a file
 files = glob.glob('prosite_motifs/*')
 for file in files:
-	motifs = open("motifs.txt", "a")
+	motifs = open("reports/motifs.txt", "a")
 	elements = []
 	with open(file,'r') as f:
 		for line in f:
 			pattern1 = 'Sequence'
 			if re.search( pattern1, line):
-				elements.append(line.split()[2]) #the accession value
+				elements.append(file.split('/')[1][:-16]) #the accession value
 			pattern2 = 'Motif'
 			if re.search(pattern2,line):
 				elements.append(line.split()[2]) # the motif
 	for element in elements:
 		motifs.write(element + '\t')
 	motifs.write('\n')
-print('Done. The motifs for each sequence can be found in motifs.txt')
+print('Done. The motifs for each sequence can be found in reports/motifs.txt')
 
 #Option to perform tmap analysis
 if input("Do you want to predict and plot possible transmembrane segments in the sequences (tmap, small datasets might result in no hits)? If yes, press y:\n\t") =='y':
-	os.system('tmap -sequences protein_sequences/aligned_sequences.fa -graph svg -outfile report.tmap -auto && tmap -sequences protein_sequences/aligned_sequences.fa -graph x11 -outfile report.tmap -auto')
+	os.system('tmap -sequences protein_sequences/aligned_sequences.fa -graph svg -outfile reports/report.tmap -auto && tmap -sequences protein_sequences/aligned_sequences.fa -graph x11 -outfile reports/report.tmap -auto')
 #iep analysis
 if input('Would you like to calculate the isoelectric point of the chosen proteins? If yes, press y:\n\t') == 'y':
-	os.system('iep -sequence protein_sequences/aligned_sequences.fa -outfile report.iep')
+	os.system('iep -sequence protein_sequences/aligned_sequences.fa -outfile reports/report.iep')
 #hmoment analysis
 if input('Would you like to calculate the hydrophobic moment for the chosen proteins? If yes, press y\n\t') == 'y':
-	os.system('hmoment -seqall protein_sequences/aligned_sequences.fa  -outfile report.hmoment ')
+	os.system('hmoment -seqall protein_sequences/aligned_sequences.fa  -outfile reports/report.hmoment ')
 #pepwindowall analysis
 if input('Would you like to plot a superimposed hydropathy plot for the chosen sequences (not recommended for large datasets)? If yes, press y\n\t') == 'y':
 	os.system('pepwindowall -sequences protein_sequences/aligned_sequences.fa -window {} -gxtitle="Residue Position" -gytitle="Hydropathy" -graph svg && pepwindowall -sequences protein_sequences/aligned_sequences.fa -window {} -gxtitle="Residue Position" -gytitle="Hydropathy" -graph x11 '.format(winsize,winsize))
-#interesting emboss apps: helixturnhelix, charge, pepstats?
+
+#Summarising all the results
+acc_motif = {}
+for line in open("reports/motifs.txt", "r"):
+	line = line.strip() # remove newline
+	motifs = ','.join(line.split('\t')[1:]) #Joining all the motifd that were found into comma-separated string
+	acc_motif[line.split('\t')[0]] = motifs
 
 
+df = pd.read_csv("acc_spp.txt", sep='\t', names=['Accession_number','Species','Motifs','Isoelectric_point','Max_Hmoment'])
+for index, row in df.iterrows():
+	df.loc[index,'Motifs'] = acc_motif[df.loc[index,'Accession_number']]
+
+
+try:
+	acc_iep = {}
+	for line in open("reports/report.iep","r"):
+		if line.startswith('IEP'):
+			acc = line.split(' ')[2]
+		elif line.startswith('Isoelectric'):
+			iep = line.strip().split(' ')[3]
+			acc_iep[acc] = iep
+	for index, row in df.iterrows():
+		try:
+			df.loc[index,'Isoelectric_point'] = acc_iep[df.loc[index,'Accession_number']]
+		except KeyError:
+			df.loc[index,'Isoelectric_point'] = 'NaN'
+except FileNotFoundError:
+		print('Isoelectric point was not calculated, skipping from final report')
+
+try:
+	acc_hmoment = {}
+	for line in open('reports/report.hmoment','r'):
+		if line.startswith('HMOMENT'):
+			acc = line.split(' ')[2]
+		elif line.startswith('Window'):
+			hmoment = line.strip().split(' ')[-1]
+			acc_hmoment[acc] = hmoment
+	for index, row in df.iterrows():
+		try:
+			df.loc[index,'Max_Hmoment'] = acc_hmoment[df.loc[index,'Accession_number']]
+		except KeyError:
+			df.loc[index,'Max_Hmoment'] = 'NaN'
+
+except FileNotFoundError:
+		print('Hydrophobic moment was not calculated, skipping from final report')
+
+df.to_csv('output.tsv',sep='\t')
