@@ -1,9 +1,14 @@
 #!/usr/bin/python3
 
 #Importing all the libraries I might use
-import os,subprocess,shutil,sys,re,glob,ete3,collections,argparse,fileinput
-import numpy as np
-import pandas as pd
+try:
+	import os,subprocess,shutil,sys,re,glob,ete3,collections,argparse,fileinput
+	import numpy as np
+	import pandas as pd
+except ModuleNotFoundError:
+	print('One or more of the Modules is not installed. Please use pip install {Module} to be able to use this program.\nThe folowing modules are needed:\nos\nsubprocess\nshutil\nsys\nre\nglob\nete3\ncollections\nargparse\nfileinput')
+	print('Exiting...')
+	sys.exit() #If sys not installed, this will give an error too
 from ete3 import Tree
 from collections import Counter
 
@@ -292,5 +297,5 @@ except FileNotFoundError:
 		df['Max_Hmoment'] = 'NaN'
 #Save the df
 df.to_csv('output.tsv',sep='\t')
-#Remove unwanted files
-os.system('rm -fr acc_spp.txt  clustalo_tree')
+os.system('rm -fr acc_spp.txt && rm -fr clustalo_tree')
+
